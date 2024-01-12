@@ -1,1 +1,117 @@
+import numpy as np
 
+# The numerical computation of the Hessian may yield
+# some warnings. These can be ignored using:
+import warnings
+
+warnings.filterwarnings('ignore')
+
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.optimize import minimize, fmin_slsqp
+from scipy.special import gammaln
+from scipy.stats import multivariate_normal
+import math
+
+import timeit
+
+# For computation of the numerical Hessian (for the standard errors):
+# (I had to first install the numdifftools module
+# with the line "pip install numdifftools" in Anaconda prompt.)
+import numdifftools as nd
+
+# For inverting the Hessian matrix, for computing -Hessian^{-1}:
+from numpy.linalg import inv
+
+
+# Negative Log-Likelihood Function (to be minimized):
+def fMinusLogLikelihoodGARCHStudentT(vTheta):
+    dOmega = vTheta[0]
+    dAlpha = vTheta[1]
+    dBeta = vTheta[2]
+
+    # Compute the variances vH[t] in the GARCH model
+    # (starting with the sample variance):
+
+    iT = len(g_vR)
+    vH = np.ones((iT, 1))
+
+    vH[0] = np.var(g_vR)
+
+    for t in range(1, iT):
+        vH[t] = dOmega + dAlpha * g_vR[t - 1] ** 2 + dBeta * vH[t - 1]
+
+    # Compute vector of log(density) values:
+    # Note: \ symbol for code that continues on multiple lines:
+
+    vLogPdf = -0.5*(np.log(2*np.pi)+np.log(vH)+(g_vR ** 2)/vH)
+
+    dMinusLogLikelihood = - np.sum(vLogPdf)
+
+    return dMinusLogLikelihood
+
+
+def main():
+    # Global variable g_vR: data of the log-returns:
+
+    global g_vR
+
+    # Load data and compute log-returns:
+
+    #sIn = 'SP500_1998-2007.csv'
+    df = pd.read_csv(r'C:\Users\Hugo\Documents\SP500_1998-2007.csv', index_col='Date', parse_dates=True)
+    df.drop(['Open', 'High', 'Low', 'Close', 'Volume'], axis=1, inplace=True)
+    vPrice = df.values;
+    iNumPrices = len(vPrice);
+    vReturns = 100 * (np.log(vPrice[1:iNumPrices]) - np.log(vPrice[0:(iNumPrices - 1)]));
+
+    # Select estimation window of in-sample observations:
+
+    iNumInSampleObservations = 1500;
+    g_vR = vReturns[0:iNumInSampleObservations];
+
+    # Initial values for optimization:
+
+    dOmega_ini = 0.1
+    dAlpha_ini = 0.05
+    dBeta_ini = 0.90
+
+    vTheta_ini = [dOmega_ini, dAlpha_ini, dBeta_ini]
+
+    # Restrictions for optimization:
+    vOmega_bnds = (0, 1)
+    vAlpha_bnds = (0, 1)
+    vBeta_bnds = (0, 1)
+
+    vTheta_bnds = [vOmega_bnds, vAlpha_bnds, vBeta_bnds]
+
+    # Estimation: minimize fMinusLogLikeStudentT function using fmin_slsqp command:
+
+    vTheta_ML = fmin_slsqp(fMinusLogLikelihoodGARCHStudentT, vTheta_ini, bounds=vTheta_bnds)
+
+    # Compute standard errors as sqrt of diagonal elements
+    # of estimated covariance matrix of ML estimator,
+    # where estimated covariance matrix = -(Hessian of loglikelihood evaluated at MLE)^{-1}.
+    # Note: the function already gives -loglikelihood, here we just need
+    #       Hessian^{-1} instead of -Hessian^{-1}.
+
+    mHessianofMinusLogL = nd.Hessian(fMinusLogLikelihoodGARCHStudentT)(vTheta_ML)
+    mCovariance_MLE = inv(mHessianofMinusLogL)
+    vStandardErrors = np.sqrt(np.diag(mCovariance_MLE))
+
+    # Print results with 4 decimals:
+
+    np.set_printoptions(precision=4)
+
+    print("loglikelihood: ", -fMinusLogLikelihoodGARCHStudentT(vTheta_ML));
+
+    print("ML estimator and standard errors: ");
+    print(np.stack((vTheta_ML, vStandardErrors), axis=1));
+
+    print("ML estimator: omega: ", "%.4f" % vTheta_ML[0], " (", "%.4f" % vStandardErrors[0], ")")
+    print("ML estimator: alpha: ", "%.4f" % vTheta_ML[1], " (", "%.4f" % vStandardErrors[1], ")")
+    print("ML estimator: beta:  ", "%.4f" % vTheta_ML[2], " (", "%.4f" % vStandardErrors[2], ")")
+
+
+if __name__ == "__main__":
+    main()
